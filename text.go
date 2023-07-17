@@ -9,7 +9,7 @@ import (
 	"nhooyr.io/websocket/wsjson"
 )
 
-var broadcasts = make([]chan textMessage, 0)
+var clients = make(map[*client]bool)
 
 func textHandler(w http.ResponseWriter, r *http.Request) {
 	wsConn, err := websocket.Accept(w, r, nil)
@@ -17,34 +17,36 @@ func textHandler(w http.ResponseWriter, r *http.Request) {
 		log.Println(err)
 		return
 	}
-	c := make(chan textMessage)
-	broadcasts = append(broadcasts, c)
-	go clientWriter(wsConn, c)
-	go clientReader(wsConn)
+	c := &client{Conn: wsConn, Send: make(chan *textMessage)}
+	clients[c] = true
+	go c.clientReader()
+	go c.clientWriter()
 }
 
-func clientReader(wsConn *websocket.Conn) {
+func (c *client) clientReader() {
 	for {
-		var msg textMessage
-		err := wsjson.Read(context.TODO(), wsConn, &msg)
+		var msg *textMessage = &textMessage{}
+		err := wsjson.Read(context.TODO(), c.Conn, msg)
 		if err != nil {
 			log.Println(err)
-			wsConn.Close(websocket.StatusInternalError, "failed to read from ws client")
+			delete(clients, c)
+			c.Conn.Close(websocket.StatusInternalError, err.Error())
 			return
 		}
-		for _, v := range broadcasts {
-			v <- msg
+		for c := range clients {
+			c.Send <- msg
 		}
 	}
 }
 
-func clientWriter(wsConn *websocket.Conn, broadcast chan textMessage) {
+func (c *client) clientWriter() {
 	for {
-		message := <-broadcast
-		err := wsjson.Write(context.TODO(), wsConn, &message)
+		msg := <-c.Send
+		err := wsjson.Write(context.TODO(), c.Conn, msg)
 		if err != nil {
 			log.Println(err)
-			wsConn.Close(websocket.StatusInternalError, "failed to write to ws client")
+			delete(clients, c)
+			c.Conn.Close(websocket.StatusInternalError, err.Error())
 			return
 		}
 	}

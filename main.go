@@ -11,6 +11,16 @@ import (
 )
 
 func main() {
+	addresses, err := net.InterfaceAddrs()
+	ips := []net.IP{}
+	for _, addr := range addresses {
+		if ipnet, ok := addr.(*net.IPNet); ok && !ipnet.IP.IsLoopback() {
+			if ipnet.IP.To4() != nil {
+				ips = append(ips, ipnet.IP.To4())
+			}
+		}
+	}
+
 	host, _ := os.Hostname()
 	service, err := mdns.NewMDNSService(
 		fmt.Sprintf("Wifi Chat - %v", host),
@@ -18,9 +28,11 @@ func main() {
 		"",
 		"",
 		55555,
-		[]net.IP{},
+		ips,
 		[]string{"Wifi Chat Server"},
 	)
+
+	fmt.Println(service.IPs)
 	if err != nil {
 		log.Println(err)
 		return
